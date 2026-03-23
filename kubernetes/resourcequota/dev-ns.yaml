@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-ns
+
+---
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  namespace: dev-ns
+  name: dev-ns-quota
+spec:
+  hard:
+    requests.cpu: '1'
+    requests.memory: '1Gi'
+    limits.cpu: '2'
+    limits.memory: '2Gi'
+

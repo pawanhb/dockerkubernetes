@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ns-a-deployment
+  namespace: ns-a
+  labels:
+    ns: ns-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pod-a
+  template:
+    metadata:
+      labels:
+        app: pod-a
+    spec:
+      containers:
+      - image: nginx
+        name: ns-a-pod
+        ports:
+        - containerPort: 80
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: ns-a
+  name: ns-a-service
+spec:
+  selector:
+    app: pod-a
+  ports:
+  - port: 80
+    targetPort: 80
+   
+    

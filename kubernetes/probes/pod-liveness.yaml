@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: probe-demo
+spec:
+  containers:
+  - name: probe-container
+    image: busybox:latest
+    args:
+    - /bin/sh
+    - -c
+    # Create the /tmp/healthy file immediately.
+    # Sleep for 30 seconds, then delete the file.
+    # The container will keep running for another 300 seconds.
+    - touch /tmp/healthy; sleep 30; rm -f /tmp/healthy; sleep 300
+    livenessProbe:
+      exec:
+        command:
+        # The command to execute: 'cat /tmp/healthy'
+        - cat
+        - /tmp/healthy
+      initialDelaySeconds: 5 # Wait 5 seconds before the first probe
+      periodSeconds: 5       # Run the probe every 5 seconds
+      failureThreshold: 1    # Consider the container unhealthy after 1 failure
+

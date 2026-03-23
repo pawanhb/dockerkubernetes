@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simplenodeapp-deploy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: simplenodeapp
+  template:
+    metadata:
+      labels:
+        app: simplenodeapp
+    spec:
+      containers:
+      - name: simplenodeapp-container
+        image: pawanhb/simplenodeapp-ks
+        ports:
+        - containerPort: 3000

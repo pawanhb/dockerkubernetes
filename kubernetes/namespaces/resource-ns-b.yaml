@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ns-b-pod
+  namespace: ns-b
+spec:
+  containers:
+  - image: alpine
+    name: ns-b-pod
+    command: ["/bin/sh","-c", "sleep 3600"]
+    restartPolicy: Never
+

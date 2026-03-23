@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: node-backend
+  annotations:
+    description: 'This is a backend por'
+  labels: 
+    app: simple-proj
+    tier: backend
+    environment: local
+    release: snapshot
+    version: v2
+spec:
+  containers:
+  - image: pawanhb/nodeapp
+    name: node-backend-container
+    ports:
+    - containerPort: 3000
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-frontend
+  labels:
+    app: simple-proj
+    tier: frontend
+    environment: dev
+    release: relase
+    version: v2
+spec:
+  containers:
+  - image: nginx:1.27.0
+    name: nginx-container
+    ports:
+    - containerPort: 80
+

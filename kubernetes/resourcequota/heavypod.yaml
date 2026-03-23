@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: heavy-pod
+  namespace: dev
+  labels:
+    app: heavy-pod
+spec:
+  containers:
+  - image: nginx
+    name: heavy-container
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        cpu: '1'
+        memory: '1Gi'
+      limits:
+        cpu: '2'
+        memory: '2Gi'

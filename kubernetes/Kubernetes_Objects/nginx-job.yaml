@@ -1,0 +1,14 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nginx-job
+  labels:
+    app: nginx
+spec:
+  template:
+    spec:
+      containers:
+      - image: nginx:1.27.0-alipne
+        name: nginx-container
+      restartPolicy: Never
+  backoffLimit: 2

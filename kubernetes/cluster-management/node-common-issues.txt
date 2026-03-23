@@ -1,0 +1,82 @@
+🔴 Node Shows "NotReady"
+
+Root Cause: Kubelet stopped posting status to API server, CNI not installed, or network issue
+Troubleshoot: kubectl describe node <node> → check Conditions section; systemctl status kubelet
+Fix: Restart kubelet systemctl restart kubelet; install CNI plugin if missing
+
+
+🔴 NetworkUnavailable = True
+
+Root Cause: CNI plugin not installed or crashed
+Troubleshoot: ls /etc/cni/net.d/; kubectl get pods -n kube-system — look for CNI pods in CrashLoop/Pending
+Fix: Apply CNI manifest (Calico/Flannel); restart CNI pods kubectl rollout restart ds/calico-node -n kube-system
+
+
+🔴 MemoryPressure = True
+
+Root Cause: Node is running out of memory; too many pods or a memory-leaking process
+Troubleshoot: free -h; kubectl describe node → check Allocatable vs Requests; top to find memory hogs
+Fix: Evict low-priority pods; add memory limits to pods; scale down workloads; increase node RAM
+
+
+🔴 DiskPressure = True
+
+Root Cause: Node disk is full — usually /var/lib/kubelet or /var/lib/containerd consuming too much space
+Troubleshoot: df -h; du -sh /var/lib/containerd/*
+Fix: crictl rmi --prune to remove unused images; clear old logs journalctl --vacuum-size=500M; increase disk size
+
+
+🔴 PIDPressure = True
+
+Root Cause: Too many processes running on the node, hitting the OS PID limit
+Troubleshoot: cat /proc/sys/kernel/pid_max; ps aux | wc -l
+Fix: Increase PID limit; identify and kill runaway processes; reduce pod count on node
+
+
+🔴 Kubelet Crashes / Keeps Restarting
+
+Root Cause: Misconfigured kubelet config, certificate expiry, or wrong API server address
+Troubleshoot: journalctl -u kubelet -n 100 --no-pager; check for TLS/cert errors
+Fix: Renew certs kubeadm certs renew all; fix /var/lib/kubelet/config.yaml; correct API server IP
+
+
+🔴 Node Unreachable / Tainted with node.kubernetes.io/unreachable
+
+Root Cause: Control plane cannot reach the node — firewall, security group, or node crashed
+Troubleshoot: ping <node-ip>; check AWS security groups for port 10250; curl -k https://<node-ip>:10250/healthz
+Fix: Open port 10250 in security group; check if node instance is running in AWS console
+
+
+🔴 Pods Stuck in "Pending" on a Ready Node
+
+Root Cause: Insufficient CPU/memory, node tainted, or pod has node affinity rules that don't match
+Troubleshoot: kubectl describe pod <pod> → check Events for scheduling failures; kubectl describe node → check Taints and Allocatable
+Fix: Remove taints kubectl taint node <node> key-; add tolerations to pod spec; free up resources
+
+
+🔴 Certificate Expired
+
+Root Cause: Kubernetes certificates (valid 1 year by default) have expired
+Troubleshoot: kubeadm certs check-expiration; openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -dates
+Fix: kubeadm certs renew all; restart control plane pods kubectl -n kube-system rollout restart
+
+
+🔴 containerd / Docker Runtime Not Running
+
+Root Cause: Container runtime crashed, causing kubelet to fail to start/manage pods
+Troubleshoot: systemctl status containerd; journalctl -u containerd -n 50
+Fix: systemctl restart containerd; check for disk full issues that may have caused the crash
+
+
+🔴 Node Cordoned Accidentally
+
+Root Cause: Node was marked unschedulable via kubectl cordon — no new pods will schedule
+Troubleshoot: kubectl get nodes — look for SchedulingDisabled status
+Fix: kubectl uncordon <node-name>
+
+
+🔴 kube-proxy Not Running
+
+Root Cause: kube-proxy daemonset pod crashed — causes service networking to break
+Troubleshoot: kubectl get pods -n kube-system | grep kube-proxy; kubectl logs -n kube-system <kube-proxy-pod>
+Fix: kubectl rollout restart ds/kube-proxy -n kube-system

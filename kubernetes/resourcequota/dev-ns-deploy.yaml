@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: dev-ns
+  name: dev-ns-deployment
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: dev-ns-pods
+  template:
+    metadata:
+      labels:
+        app: dev-ns-pods
+    spec:
+      containers:
+      - image: nginx
+        name: nginx-deploy-container
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: '0.3'
+            memory: '256Mi'
+          limits:
+            cpu: '0.5'
+            memory: '512Mi'

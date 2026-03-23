@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: appl-deployment
+spec:
+  replicas: 3
+  selector:
+    matchExpressions:
+    - key: release
+      operator: In
+      values: [snapshot,release]
+  template:
+    metadata:
+      labels:
+        app: simple-proj
+        tier: frontend
+        release: snapshot
+    spec:
+      containers:
+      - name: frontend-container 
+        image: nginx
+        ports:
+        - containerPort: 80

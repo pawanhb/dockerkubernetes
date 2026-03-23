@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata: 
+  namespace: dev-ns
+  name: dev-pod
+spec:
+  containers:
+  - image: nginx
+    name: nginx-container
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        cpu: '0.2'
+        memory: '256Mi'
+      limits:
+        cpu: '0.4' 
+        memory: '512Mi'
+     

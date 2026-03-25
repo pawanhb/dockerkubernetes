@@ -1,0 +1,152 @@
+# =================================================================
+# Kubernetes Cluster Upgrade — kubeadm-based clusters
+# Official docs: https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/
+#
+# Key rules:
+#   - Upgrade one minor version at a time (1.28 → 1.29 → 1.30)
+#   - Control plane must be upgraded before worker nodes
+#   - kubelet and kubectl must match within one minor version of API server
+# =================================================================
+
+# -----------------------------------------------------------------
+# PHASE 1: Upgrade first control plane node
+# -----------------------------------------------------------------
+#
+# 1. Check available versions
+#    apt-cache madison kubeadm      # Debian/Ubuntu
+#    yum list --showduplicates kubeadm  # RHEL/CentOS
+#
+# 2. Upgrade kubeadm on the control plane node
+#    apt-mark unhold kubeadm
+#    apt-get install -y kubeadm=1.30.0-00
+#    apt-mark hold kubeadm
+#    kubeadm version
+#
+# 3. Verify upgrade plan
+#    kubeadm upgrade plan
+#    kubeadm upgrade plan v1.30.0   # for a specific version
+#
+# 4. Apply the upgrade
+#    kubeadm upgrade apply v1.30.0 --yes
+#    # Flags:
+#    #   --certificate-renewal=true (default) — renew certs
+#    #   --dry-run                  — preview without applying
+#    #   --ignore-preflight-errors  — skip specific checks
+#
+# 5. Upgrade kubelet and kubectl on control plane
+#    apt-mark unhold kubelet kubectl
+#    apt-get install -y kubelet=1.30.0-00 kubectl=1.30.0-00
+#    apt-mark hold kubelet kubectl
+#    systemctl daemon-reload
+#    systemctl restart kubelet
+#
+# 6. Verify control plane
+#    kubectl get nodes
+#    kubectl version --short
+
+# -----------------------------------------------------------------
+# PHASE 2: Upgrade additional control plane nodes (if HA setup)
+# -----------------------------------------------------------------
+#
+# Repeat for each additional control plane node:
+#    apt-get install -y kubeadm=1.30.0-00
+#    kubeadm upgrade node            # (not 'apply' — for non-primary)
+#    apt-get install -y kubelet=1.30.0-00 kubectl=1.30.0-00
+#    systemctl daemon-reload && systemctl restart kubelet
+
+# -----------------------------------------------------------------
+# PHASE 3: Upgrade worker nodes (one at a time)
+# -----------------------------------------------------------------
+#
+# For each worker node (run from control plane or CI system):
+#
+# a) Cordon and drain the node
+#    kubectl cordon worker-node-1
+#    kubectl drain worker-node-1 \
+#      --ignore-daemonsets \
+#      --delete-emptydir-data \
+#      --grace-period=30 \
+#      --timeout=180s
+#
+# b) SSH into the worker node and upgrade:
+#    apt-mark unhold kubeadm
+#    apt-get install -y kubeadm=1.30.0-00
+#    apt-mark hold kubeadm
+#    kubeadm upgrade node
+#    apt-mark unhold kubelet kubectl
+#    apt-get install -y kubelet=1.30.0-00 kubectl=1.30.0-00
+#    apt-mark hold kubelet kubectl
+#    systemctl daemon-reload
+#    systemctl restart kubelet
+#
+# c) Uncordon the node (from control plane)
+#    kubectl uncordon worker-node-1
+#    kubectl get nodes worker-node-1  # verify Ready
+
+# -----------------------------------------------------------------
+# PHASE 4: Post-upgrade validation
+# -----------------------------------------------------------------
+#
+# kubectl get nodes                          # all nodes Ready + new version
+# kubectl get pods -A                        # all system pods healthy
+# kubectl get componentstatuses             # scheduler, controller healthy
+# kubectl cluster-info
+# kubectl get events -n kube-system --sort-by='.lastTimestamp'
+# kubectl rollout status daemonset/kube-proxy -n kube-system
+
+# =================================================================
+# Kubeconfig management
+# =================================================================
+
+# -----------------------------------------------------------------
+# View and switch contexts
+# -----------------------------------------------------------------
+#
+# kubectl config get-contexts               # list all contexts
+# kubectl config current-context           # current active context
+# kubectl config use-context my-cluster    # switch context
+# kubectl config delete-context old-ctx    # remove a context
+#
+# Merge multiple kubeconfigs:
+#   KUBECONFIG=~/.kube/config:~/.kube/cluster2.yaml \
+#   kubectl config view --flatten > ~/.kube/config-merged
+#
+# Set namespace for current context:
+#   kubectl config set-context --current --namespace=production
+
+# =================================================================
+# etcd backup and restore (critical for disaster recovery)
+# =================================================================
+
+# -----------------------------------------------------------------
+# etcd backup (run on a control plane node)
+# -----------------------------------------------------------------
+#
+# ETCDCTL_API=3 etcdctl snapshot save /backup/etcd-snapshot-$(date +%Y%m%d).db \
+#   --endpoints=https://127.0.0.1:2379 \
+#   --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+#   --cert=/etc/kubernetes/pki/etcd/server.crt \
+#   --key=/etc/kubernetes/pki/etcd/server.key
+#
+# Verify backup:
+#   ETCDCTL_API=3 etcdctl snapshot status /backup/etcd-snapshot.db --write-out=table
+
+# -----------------------------------------------------------------
+# etcd restore (disaster recovery)
+# -----------------------------------------------------------------
+#
+# 1. Stop the API server (remove its static pod manifest temporarily)
+#    mv /etc/kubernetes/manifests/kube-apiserver.yaml /tmp/
+#
+# 2. Restore the snapshot
+#    ETCDCTL_API=3 etcdctl snapshot restore /backup/etcd-snapshot.db \
+#      --data-dir=/var/lib/etcd-restored \
+#      --initial-cluster=master=https://127.0.0.1:2380 \
+#      --initial-cluster-token=etcd-cluster-1 \
+#      --initial-advertise-peer-urls=https://127.0.0.1:2380
+#
+# 3. Update etcd static pod to use restored data dir
+#    Edit /etc/kubernetes/manifests/etcd.yaml: --data-dir=/var/lib/etcd-restored
+#
+# 4. Restore API server
+#    mv /tmp/kube-apiserver.yaml /etc/kubernetes/manifests/

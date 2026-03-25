@@ -1,0 +1,96 @@
+# =================================================================
+# PodDisruptionBudgets — protect availability during disruptions
+# =================================================================
+
+# -----------------------------------------------------------------
+# 1. minAvailable — at least N pods must remain running
+# -----------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: production
+spec:
+  minAvailable: 2             # integer: at least 2 pods always up
+  # minAvailable: "80%"       # or as a percentage of desired replicas
+  selector:
+    matchLabels:
+      app: frontend
+      tier: web
+---
+# -----------------------------------------------------------------
+# 2. maxUnavailable — at most N pods may be disrupted at once
+# -----------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: production
+spec:
+  maxUnavailable: 1           # at most 1 pod can be down at a time
+  # maxUnavailable: "25%"     # or as percentage
+  selector:
+    matchLabels:
+      app: backend-api
+---
+# -----------------------------------------------------------------
+# 3. Database PDB — very strict, only 0 allowed unavailable
+# -----------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: production
+spec:
+  minAvailable: "67%"         # for a 3-replica StatefulSet: always 2 up
+  selector:
+    matchLabels:
+      app: postgres
+---
+# -----------------------------------------------------------------
+# 4. Combined Deployment + PDB example
+# -----------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ha-app
+  namespace: production
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: ha-app
+  template:
+    metadata:
+      labels:
+        app: ha-app
+        tier: backend
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: ha-app
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ha-app-pdb
+  namespace: production
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: ha-app

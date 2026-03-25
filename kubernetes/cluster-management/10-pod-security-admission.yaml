@@ -1,0 +1,206 @@
+# =================================================================
+# Pod Security Standards (PSS) — replaces PodSecurityPolicy (deprecated)
+# Applied via namespace labels (built-in since k8s 1.23)
+#
+# Three levels:
+#   privileged  — unrestricted (for system namespaces)
+#   baseline    — minimal restrictions, prevents known privilege escalation
+#   restricted  — heavily restricted, current best practices
+#
+# Three modes per level:
+#   enforce — reject violating pods
+#   audit   — log violations but allow pods
+#   warn    — warn API clients but allow pods
+# =================================================================
+
+# -----------------------------------------------------------------
+# 1. Apply PSS labels to a namespace
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-app
+  labels:
+    # Enforce restricted policy — pods must comply or be rejected
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.30
+
+    # Audit baseline violations — log them without blocking
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/audit-version: v1.30
+
+    # Warn on restricted violations — developer feedback
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: v1.30
+---
+# -----------------------------------------------------------------
+# 2. Pod compliant with 'restricted' PSS
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restricted-pod
+  namespace: secure-app
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault       # or Localhost with a custom profile
+  containers:
+    - name: app
+      image: nginx:alpine
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]          # drop all Linux capabilities
+          # add: ["NET_BIND_SERVICE"]  # add back only if truly needed
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: var-cache
+          mountPath: /var/cache/nginx
+        - name: var-run
+          mountPath: /var/run
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+        limits:
+          cpu: "200m"
+          memory: "128Mi"
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    - name: var-cache
+      emptyDir: {}
+    - name: var-run
+      emptyDir: {}
+---
+# =================================================================
+# ValidatingWebhookConfiguration — custom admission control
+# Requires a running webhook server (e.g. OPA Gatekeeper, Kyverno)
+# =================================================================
+
+# -----------------------------------------------------------------
+# 3. ValidatingWebhookConfiguration — block non-compliant images
+# -----------------------------------------------------------------
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: image-policy-webhook
+webhooks:
+  - name: image-policy.company.com
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    clientConfig:
+      service:
+        namespace: kube-system
+        name: image-policy-webhook
+        path: /validate
+        port: 443
+      caBundle: ""               # base64-encoded CA cert of webhook server
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    failurePolicy: Fail          # Fail | Ignore (Fail = safer for security)
+    timeoutSeconds: 10
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kube-system", "kube-public"]
+---
+# -----------------------------------------------------------------
+# 4. MutatingWebhookConfiguration — auto-inject sidecar
+# -----------------------------------------------------------------
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: sidecar-injector
+webhooks:
+  - name: sidecar-injector.company.com
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    clientConfig:
+      service:
+        namespace: istio-system
+        name: istiod
+        path: /inject
+        port: 443
+      caBundle: ""
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Ignore          # don't block pod creation if injector is down
+    namespaceSelector:
+      matchLabels:
+        istio-injection: enabled   # only inject in opt-in namespaces
+    objectSelector:
+      matchExpressions:
+        - key: sidecar.istio.io/inject
+          operator: NotIn
+          values: ["false"]
+---
+# =================================================================
+# OPA Gatekeeper ConstraintTemplate + Constraint
+# Install: helm install gatekeeper opa/gatekeeper-system
+# =================================================================
+
+# -----------------------------------------------------------------
+# 5. ConstraintTemplate — define a reusable policy
+# -----------------------------------------------------------------
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+        violation[{"msg": msg, "details": {"missing_labels": missing}}] {
+          provided := {label | input.review.object.metadata.labels[label]}
+          required := {label | label := input.parameters.labels[_]}
+          missing := required - provided
+          count(missing) > 0
+          msg := sprintf("missing required labels: %v", [missing])
+        }
+---
+# -----------------------------------------------------------------
+# 6. Constraint — enforce the template on namespaces
+# -----------------------------------------------------------------
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: ns-must-have-owner-and-env
+spec:
+  enforcementAction: deny           # deny | dryrun | warn
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Namespace"]
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - gatekeeper-system
+  parameters:
+    labels: ["owner", "environment"]

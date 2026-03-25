@@ -1,0 +1,183 @@
+# =================================================================
+# Network Policies
+# Requires a CNI plugin that supports NetworkPolicy (Calico, Cilium,
+# Weave Net, etc.). Flannel alone does NOT enforce NetworkPolicies.
+# =================================================================
+
+# -----------------------------------------------------------------
+# 1. Default deny all ingress — start with zero-trust
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: production
+spec:
+  podSelector: {}          # {} matches ALL pods in the namespace
+  policyTypes:
+    - Ingress              # only ingress rules; egress remains open
+---
+# -----------------------------------------------------------------
+# 2. Default deny all egress
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+# -----------------------------------------------------------------
+# 3. Allow DNS egress (always needed when denying all egress)
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# -----------------------------------------------------------------
+# 4. Allow frontend → backend traffic only
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-frontend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend                 # applies to backend pods
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: frontend        # only allow from frontend pods
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# -----------------------------------------------------------------
+# 5. Allow backend → database traffic only
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-allow-backend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      tier: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# -----------------------------------------------------------------
+# 6. Allow monitoring namespace to scrape metrics from all pods
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-ingress
+  namespace: production
+spec:
+  podSelector: {}                   # all pods in production
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              purpose: observability   # matches monitoring namespace label
+      ports:
+        - port: 9090                  # Prometheus scrape port
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
+---
+# -----------------------------------------------------------------
+# 7. Allow egress to external HTTPS (e.g. external APIs)
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-https
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      allow-external: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 443
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # block internal RFC1918 ranges
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+---
+# -----------------------------------------------------------------
+# 8. Combined ingress + egress policy for an API service
+# -----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-service-policy
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: api-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: production
+          podSelector:
+            matchLabels:
+              tier: frontend
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              tier: database
+      ports:
+        - port: 5432
+          protocol: TCP
+    - ports:                        # allow DNS
+        - port: 53
+          protocol: UDP

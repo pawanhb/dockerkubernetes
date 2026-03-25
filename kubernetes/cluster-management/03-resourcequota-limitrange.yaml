@@ -1,0 +1,138 @@
+# =================================================================
+# ResourceQuota — namespace-level resource ceilings
+# =================================================================
+
+# -----------------------------------------------------------------
+# Development namespace quota (generous)
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-quota
+  namespace: development
+spec:
+  hard:
+    # Compute
+    requests.cpu: "8"             # total CPU requested by all pods
+    requests.memory: 16Gi
+    limits.cpu: "16"              # total CPU limits for all pods
+    limits.memory: 32Gi
+
+    # Object counts
+    pods: "40"
+    services: "20"
+    secrets: "30"
+    configmaps: "30"
+    persistentvolumeclaims: "15"
+    services.loadbalancers: "2"
+    services.nodeports: "5"
+
+    # Storage
+    requests.storage: 100Gi
+    standard.storageclass.storage.k8s.io/requests.storage: 80Gi
+
+    # Scope selectors — apply quota only to non-terminating pods
+  scopeSelector:
+    matchExpressions:
+      - operator: NotIn
+        scopeName: PriorityClass
+        values: ["system-node-critical", "system-cluster-critical"]
+---
+# -----------------------------------------------------------------
+# Production namespace quota (strict)
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: prod-quota
+  namespace: production
+spec:
+  hard:
+    requests.cpu: "32"
+    requests.memory: 64Gi
+    limits.cpu: "64"
+    limits.memory: 128Gi
+    pods: "100"
+    services: "30"
+    secrets: "50"
+    configmaps: "50"
+    persistentvolumeclaims: "30"
+    services.loadbalancers: "5"
+    requests.storage: 500Gi
+---
+# =================================================================
+# LimitRange — per-pod/container defaults and maximums
+# =================================================================
+
+# -----------------------------------------------------------------
+# Development LimitRange
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limitrange
+  namespace: development
+spec:
+  limits:
+    # Container-level limits
+    - type: Container
+      default:                    # applied when container has no limits set
+        cpu: "500m"
+        memory: "256Mi"
+      defaultRequest:             # applied when container has no requests set
+        cpu: "100m"
+        memory: "64Mi"
+      max:                        # container cannot exceed these
+        cpu: "2"
+        memory: "2Gi"
+      min:                        # container must request at least these
+        cpu: "50m"
+        memory: "32Mi"
+      maxLimitRequestRatio:       # limits / requests ratio cannot exceed this
+        cpu: "4"
+        memory: "4"
+
+    # Pod-level limits (sum of all containers)
+    - type: Pod
+      max:
+        cpu: "4"
+        memory: "4Gi"
+      min:
+        cpu: "50m"
+        memory: "32Mi"
+
+    # PVC limits
+    - type: PersistentVolumeClaim
+      max:
+        storage: 20Gi
+      min:
+        storage: 1Gi
+---
+# -----------------------------------------------------------------
+# Production LimitRange (tighter defaults, higher maxes)
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: prod-limitrange
+  namespace: production
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "250m"
+        memory: "128Mi"
+      max:
+        cpu: "8"
+        memory: "8Gi"
+      min:
+        cpu: "100m"
+        memory: "64Mi"
+    - type: PersistentVolumeClaim
+      max:
+        storage: 100Gi
+      min:
+        storage: 1Gi

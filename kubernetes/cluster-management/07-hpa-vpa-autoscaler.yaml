@@ -1,0 +1,178 @@
+# =================================================================
+# Horizontal Pod Autoscaler (HPA) and Vertical Pod Autoscaler (VPA)
+# Requires: metrics-server installed (for CPU/memory based HPA)
+# kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+# =================================================================
+
+# -----------------------------------------------------------------
+# 1. HPA v2 — CPU and memory based scaling
+# -----------------------------------------------------------------
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend-api           # must match deployment name
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    # CPU utilization based scaling
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70    # scale up when avg CPU > 70% of request
+
+    # Memory utilization based scaling
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60     # wait 60s before scaling up again
+      policies:
+        - type: Percent
+          value: 100                     # double replicas at most per period
+          periodSeconds: 60
+        - type: Pods
+          value: 4                       # add at most 4 pods per period
+          periodSeconds: 60
+      selectPolicy: Max                  # use the more aggressive policy
+
+    scaleDown:
+      stabilizationWindowSeconds: 300    # wait 5min before scaling down
+      policies:
+        - type: Percent
+          value: 25                      # remove at most 25% of replicas
+          periodSeconds: 60
+      selectPolicy: Min                  # use the more conservative policy
+---
+# -----------------------------------------------------------------
+# 2. HPA with custom metrics (Prometheus Adapter or KEDA required)
+# -----------------------------------------------------------------
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: queue-processor-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: queue-processor
+  minReplicas: 1
+  maxReplicas: 50
+  metrics:
+    # External metric from Prometheus Adapter
+    - type: External
+      external:
+        metric:
+          name: rabbitmq_queue_messages_ready
+          selector:
+            matchLabels:
+              queue: "job-queue"
+        target:
+          type: AverageValue
+          averageValue: "30"       # scale up when >30 messages per replica
+
+    # Pod-level custom metric
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "100"
+---
+# -----------------------------------------------------------------
+# 3. VPA — Vertical Pod Autoscaler
+# Requires VPA CRDs and admission controller installed:
+# git clone https://github.com/kubernetes/autoscaler
+# ./autoscaler/vertical-pod-autoscaler/hack/vpa-up.sh
+# -----------------------------------------------------------------
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: backend-vpa
+  namespace: production
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend-api
+  updatePolicy:
+    updateMode: "Auto"      # Off | Initial | Recreate | Auto
+    # Off      — only provides recommendations, no changes
+    # Initial  — sets resources only at pod creation
+    # Recreate — evicts pods to apply new recommendations
+    # Auto     — same as Recreate (in-place update when supported)
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"            # applies to all containers
+        minAllowed:
+          cpu: "50m"
+          memory: "64Mi"
+        maxAllowed:
+          cpu: "4"
+          memory: "4Gi"
+        controlledResources: ["cpu", "memory"]
+        controlledValues: RequestsAndLimits   # or RequestsOnly
+---
+# -----------------------------------------------------------------
+# 4. Cluster Autoscaler — scales node count (cloud-specific)
+# Deploy via Helm or cloud provider managed node groups.
+# Below is the Cluster Autoscaler Deployment for AWS EKS.
+# -----------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    app: cluster-autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app: cluster-autoscaler
+    spec:
+      serviceAccountName: cluster-autoscaler
+      containers:
+        - name: cluster-autoscaler
+          image: registry.k8s.io/autoscaling/cluster-autoscaler:v1.29.0
+          command:
+            - ./cluster-autoscaler
+            - --v=4
+            - --stderrthreshold=info
+            - --cloud-provider=aws
+            - --skip-nodes-with-local-storage=false
+            - --expander=least-waste        # least-waste | random | most-pods | priority
+            - --node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/my-cluster
+            - --balance-similar-node-groups
+            - --scale-down-enabled=true
+            - --scale-down-delay-after-add=10m
+            - --scale-down-unneeded-time=10m
+            - --scale-down-utilization-threshold=0.5
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "300Mi"
+            limits:
+              cpu: "100m"
+              memory: "300Mi"

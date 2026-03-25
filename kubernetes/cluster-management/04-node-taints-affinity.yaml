@@ -1,0 +1,160 @@
+# =================================================================
+# Node Labels, Taints, Tolerations, and Affinity
+# =================================================================
+
+# -----------------------------------------------------------------
+# Apply labels and taints to nodes imperatively:
+#
+# kubectl label node node1 node-role=gpu dedicated=ml-workloads
+# kubectl label node node2 node-role=high-memory tier=premium
+# kubectl label node node3 disk=ssd zone=us-east-1a
+#
+# kubectl taint node node1 dedicated=gpu:NoSchedule
+#   NoSchedule   — new pods without matching toleration won't schedule
+#   PreferNoSchedule — avoid scheduling but not hard block
+#   NoExecute    — existing pods evicted if no toleration
+#
+# kubectl taint node node2 high-memory=true:NoSchedule
+# -----------------------------------------------------------------
+
+# -----------------------------------------------------------------
+# 1. Pod with nodeSelector (simple label targeting)
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nodeselector-demo
+  namespace: development
+spec:
+  nodeSelector:
+    disk: ssd
+    zone: us-east-1a
+  containers:
+    - name: app
+      image: nginx:alpine
+---
+# -----------------------------------------------------------------
+# 2. Pod with nodeAffinity (expressive scheduling rules)
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Pod
+metadata:
+  name: node-affinity-demo
+  namespace: development
+spec:
+  affinity:
+    nodeAffinity:
+      # HARD rule — pod will NOT schedule if not satisfied
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values: ["amd64", "arm64"]
+              - key: zone
+                operator: In
+                values: ["us-east-1a", "us-east-1b"]
+
+      # SOFT rule — scheduler prefers but won't enforce
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80               # higher weight = stronger preference
+          preference:
+            matchExpressions:
+              - key: disk
+                operator: In
+                values: ["ssd"]
+        - weight: 20
+          preference:
+            matchExpressions:
+              - key: node-role
+                operator: In
+                values: ["high-performance"]
+
+    # Pod anti-affinity — spread pods across nodes for HA
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: ["node-affinity-demo"]
+          topologyKey: kubernetes.io/hostname   # one pod per node
+
+  containers:
+    - name: app
+      image: nginx:alpine
+---
+# -----------------------------------------------------------------
+# 3. Pod targeting a GPU node with taint toleration
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-workload
+  namespace: development
+spec:
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"           # Equal | Exists
+      value: "gpu"
+      effect: "NoSchedule"        # NoSchedule | PreferNoSchedule | NoExecute
+
+    # Tolerate all taints on a node (use sparingly)
+    # - operator: "Exists"
+    #   effect: "NoSchedule"
+
+    # Allow pod to run on a node with NoExecute taint for 60s
+    - key: "node.kubernetes.io/not-ready"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 60
+
+  nodeSelector:
+    node-role: gpu
+
+  containers:
+    - name: gpu-app
+      image: nvidia/cuda:12.0-base
+      resources:
+        limits:
+          nvidia.com/gpu: "1"     # requires NVIDIA device plugin
+---
+# -----------------------------------------------------------------
+# 4. Deployment with topologySpreadConstraints (k8s 1.19+)
+#    Ensures pods spread evenly across zones
+# -----------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spread-demo
+  namespace: production
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: spread-demo
+  template:
+    metadata:
+      labels:
+        app: spread-demo
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1                               # max difference between zones
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule         # DoNotSchedule | ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: spread-demo
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname      # also spread across nodes
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: spread-demo
+      containers:
+        - name: app
+          image: nginx:alpine
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"

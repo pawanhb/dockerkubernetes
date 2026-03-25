@@ -1,0 +1,51 @@
+# =================================================================
+# Namespaces — logical isolation within a single cluster
+# =================================================================
+
+# -----------------------------------------------------------------
+# 1. Development namespace
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: development
+  labels:
+    environment: dev
+    team: backend
+    managed-by: platform-team
+  annotations:
+    description: "Development workloads — non-production"
+    contact: "platform-team@company.com"
+---
+# -----------------------------------------------------------------
+# 2. Staging namespace
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    environment: staging
+    team: backend
+---
+# -----------------------------------------------------------------
+# 3. Production namespace
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    environment: prod
+    team: backend
+    tier: critical
+---
+# -----------------------------------------------------------------
+# 4. Monitoring namespace
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    purpose: observability

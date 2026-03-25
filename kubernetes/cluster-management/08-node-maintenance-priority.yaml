@@ -1,0 +1,120 @@
+# =================================================================
+# Node Maintenance — cordon, drain, upgrade, uncordon
+# =================================================================
+
+# These are imperative kubectl commands (not YAML) — documented here
+# as a runbook for cluster operations.
+
+# -----------------------------------------------------------------
+# Node maintenance workflow
+# -----------------------------------------------------------------
+#
+# 1. Cordon — mark node as unschedulable (no new pods will land here)
+#    kubectl cordon <node-name>
+#    kubectl get node <node-name>   # STATUS = Ready,SchedulingDisabled
+#
+# 2. Drain — evict all pods from the node safely
+#    kubectl drain <node-name> \
+#      --ignore-daemonsets \          # DaemonSet pods can't be evicted
+#      --delete-emptydir-data \       # evict pods with emptyDir volumes
+#      --force \                      # evict pods not managed by a controller
+#      --grace-period=60 \            # seconds to wait for graceful shutdown
+#      --timeout=300s                 # fail if drain takes longer than 5min
+#
+# 3. Perform maintenance (OS upgrade, kernel patch, hardware replacement)
+#
+# 4. Uncordon — allow scheduling again
+#    kubectl uncordon <node-name>
+#
+# -----------------------------------------------------------------
+# Node labels management
+# -----------------------------------------------------------------
+#
+# Add label:
+#   kubectl label node <node> disk=ssd zone=us-east-1a
+#
+# Remove label:
+#   kubectl label node <node> disk-
+#
+# Overwrite label:
+#   kubectl label node <node> tier=premium --overwrite
+#
+# -----------------------------------------------------------------
+# Node taints management
+# -----------------------------------------------------------------
+#
+# Add taint:
+#   kubectl taint node <node> dedicated=gpu:NoSchedule
+#
+# Remove taint (append '-' to the taint spec):
+#   kubectl taint node <node> dedicated=gpu:NoSchedule-
+#
+# View node taints and labels:
+#   kubectl describe node <node> | grep -E "Taints:|Labels:" -A5
+
+# =================================================================
+# PriorityClass — control pod eviction order
+# =================================================================
+
+# -----------------------------------------------------------------
+# System-critical (built-in, shown for reference)
+# system-cluster-critical: 2000000000
+# system-node-critical:    2000001000
+# -----------------------------------------------------------------
+
+# -----------------------------------------------------------------
+# High-priority production workloads
+# -----------------------------------------------------------------
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority   # PreemptLowerPriority | Never
+description: "High priority for production critical workloads"
+---
+# -----------------------------------------------------------------
+# Medium-priority — standard production workloads
+# -----------------------------------------------------------------
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: medium-priority
+value: 500000
+globalDefault: true                      # applied when no priorityClassName set
+preemptionPolicy: PreemptLowerPriority
+description: "Default priority for standard workloads"
+---
+# -----------------------------------------------------------------
+# Low-priority — batch and dev workloads (evicted first)
+# -----------------------------------------------------------------
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority
+value: 100000
+globalDefault: false
+preemptionPolicy: Never
+description: "Low priority for batch jobs and dev workloads"
+---
+# -----------------------------------------------------------------
+# Pod using a PriorityClass
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: Pod
+metadata:
+  name: critical-app
+  namespace: production
+spec:
+  priorityClassName: high-priority
+  containers:
+    - name: app
+      image: myapp:latest
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "512Mi"

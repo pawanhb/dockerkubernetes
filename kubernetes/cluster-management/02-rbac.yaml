@@ -1,0 +1,168 @@
+# =================================================================
+# RBAC — Role-Based Access Control
+# =================================================================
+
+# -----------------------------------------------------------------
+# 1. ServiceAccount — identity for a workload inside the cluster
+# -----------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-service-account
+  namespace: development
+  labels:
+    app: my-app
+automountServiceAccountToken: false   # opt-in explicitly per pod
+---
+# -----------------------------------------------------------------
+# 2. Role — namespace-scoped permissions
+#    Grants read-only access to pods and logs in 'development'
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader
+  namespace: development
+rules:
+  - apiGroups: [""]                        # "" = core API group
+    resources: ["pods", "pods/log", "pods/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+---
+# -----------------------------------------------------------------
+# 3. Role — developer with deploy rights in development namespace
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer
+  namespace: development
+rules:
+  - apiGroups: ["", "apps", "batch"]
+    resources:
+      - pods
+      - deployments
+      - replicasets
+      - services
+      - configmaps
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]              # can read but not modify secrets
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]                   # allows kubectl exec and port-forward
+---
+# -----------------------------------------------------------------
+# 4. ClusterRole — cluster-wide, for viewing nodes and namespaces
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-viewer
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+# -----------------------------------------------------------------
+# 5. ClusterRole — admin for specific namespaces (reusable)
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-admin
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# -----------------------------------------------------------------
+# 6. RoleBinding — bind 'pod-reader' Role to a specific user
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods-binding
+  namespace: development
+subjects:
+  - kind: User                          # User | Group | ServiceAccount
+    name: jane@company.com              # case-sensitive, matches --user in kubeconfig
+    apiGroup: rbac.authorization.k8s.io
+  - kind: Group
+    name: qa-team
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role                            # Role | ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# -----------------------------------------------------------------
+# 7. RoleBinding — bind 'developer' Role to a ServiceAccount
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-binding
+  namespace: development
+subjects:
+  - kind: ServiceAccount
+    name: app-service-account
+    namespace: development
+  - kind: User
+    name: bob@company.com
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer
+  apiGroup: rbac.authorization.k8s.io
+---
+# -----------------------------------------------------------------
+# 8. ClusterRoleBinding — bind 'cluster-viewer' to ops-team group
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-cluster-viewer
+subjects:
+  - kind: Group
+    name: ops-team
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-viewer
+  apiGroup: rbac.authorization.k8s.io
+---
+# -----------------------------------------------------------------
+# 9. ClusterRoleBinding — grant namespace-admin to a team per namespace
+#    (use RoleBinding referencing a ClusterRole for namespace-scoped grant)
+# -----------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-namespace-admin
+  namespace: development
+subjects:
+  - kind: Group
+    name: backend-team
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole          # ClusterRole used in a RoleBinding = namespace-scoped
+  name: namespace-admin
+  apiGroup: rbac.authorization.k8s.io

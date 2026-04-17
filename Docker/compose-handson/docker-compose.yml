@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  web:
+    image: nginx
+    ports:
+      - "80:80"
+    networks:
+      - frontend
+    volumes:
+      - ./app:/usr/share/nginx/hmtl
+    depends_on:
+      - app
+
+  app:
+    image: node
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    command: node server.js
+    networks:
+      - frontend
+    volumes:
+      - ./app:/app
+
+networks:
+  frontend:
+    driver: bridge
+
+ 
+    

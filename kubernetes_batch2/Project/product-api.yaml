@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: product-api
+  namespace: ecommerce
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: product-api
+  template:
+    metadata:
+      labels:
+        app: product-api
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: product-api
+      containers:
+      - name: api
+        image: hashicorp/http-echo
+        args:
+        - "-text=Product Service"
+        ports:
+        - containerPort: 5678
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        livenessProbe:
+          tcpSocket:
+            port: 5678
+          initialDelaySeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 5678
+          initialDelaySeconds: 5

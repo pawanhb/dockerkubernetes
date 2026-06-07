@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: third-pod
+  labels:
+    app: dynamic-volume-demo
+spec:
+  containers:
+  - name: dynamic-volume-c
+    image: busybox
+    command: ["sh", "-c", "sleep 3600"]
+    resources:
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+    volumeMounts:
+    - name: dynamic-volume
+      mountPath: /local/path
+  volumes:
+  - name: dynamic-volume
+    persistentVolumeClaim:
+      claimName: dynamic-volume-pvc

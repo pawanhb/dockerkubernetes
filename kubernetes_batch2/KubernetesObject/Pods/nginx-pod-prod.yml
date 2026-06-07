@@ -1,0 +1,14 @@
+#Equivalent of running POD kubectl run nginx-pod --image=nginx:1.27.0
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-pod-prod
+  labels:
+    app: nginx-pods
+spec:
+  containers:
+  - name: nginx-container
+    image: nginx:1.27.0-alpine
+    ports:
+      - containerPort: 80
